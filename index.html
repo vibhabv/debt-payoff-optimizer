@@ -607,6 +607,23 @@
                 <h3>💡 Suggested Monthly Payments Per Debt</h3>
                 <div id="payment-suggestions"></div>
             </div>
+
+            <div style="background: white; border: 2px solid #cbd5e0; border-radius: 8px; padding: 20px; margin-bottom: 20px; overflow-x: auto;">
+                <h3 style="color: #0f3460; margin-bottom: 15px; font-size: 1.2em;">📅 Month-by-Month Payment Breakdown</h3>
+                <table class="comparison-table" style="width: 100%;">
+                    <thead>
+                        <tr>
+                            <th>Month</th>
+                            <th id="debt1-header">Debt 1</th>
+                            <th id="debt2-header">Debt 2</th>
+                            <th id="debt3-header" style="display: none;">Debt 3</th>
+                            <th>Total Payment</th>
+                            <th>Total Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody id="payment-schedule-body"></tbody>
+                </table>
+            </div>
         </div>
 
         <!-- CHARTS -->
@@ -746,6 +763,21 @@
                             </select>
                         </div>
                     </div>
+
+                    <div class="form-row three">
+                        <div class="form-group">
+                            <label>Payment start date</label>
+                            <input type="date" value="${debt.startDate || ''}" onchange="updateDebt(${debt.id}, 'startDate', this.value)">
+                        </div>
+                        <div class="form-group">
+                            <label>Due date (optional)</label>
+                            <input type="date" value="${debt.dueDate || ''}" onchange="updateDebt(${debt.id}, 'dueDate', this.value)">
+                        </div>
+                        <div class="form-group">
+                            <label>Minimum payment amount</label>
+                            <input type="number" value="${debt.minPayment || ''}" onchange="updateDebt(${debt.id}, 'minPayment', parseFloat(this.value))" min="0">
+                        </div>
+                    </div>
                 </div>
             `).join('');
         }
@@ -827,11 +859,18 @@
             let month = 0;
             let totalInterestUSD = 0;
             let schedule = [];
+            let monthlyPayments = []; // Track payments per debt per month
 
             // Keep paying until all debts are gone or 360 months passed
             while (workingDebts.some(d => d.balanceUSD > 1) && month < 360) {
                 month++;
-                
+                let monthPayment = { month: month, debts: {}, totalPayment: 0, totalBalance: 0 };
+
+                // Initialize payment tracking for this month
+                workingDebts.forEach(d => {
+                    monthPayment.debts[d.originalId] = 0;
+                });
+
                 // Calculate interest for this month
                 let monthlyInterestTotal = 0;
                 let debtWithInterest = [];
@@ -873,10 +912,19 @@
                 if (priorityDebt && budgetRemaining > 0) {
                     const payment = Math.min(priorityDebt.balanceUSD, budgetRemaining);
                     priorityDebt.balanceUSD -= payment;
+                    monthPayment.debts[priorityDebt.originalId] = payment;
+                    monthPayment.totalPayment = payment;
                     budgetRemaining -= payment;
                 }
 
-                // Record this month in schedule
+                // Record payments for this month
+                workingDebts.forEach(d => {
+                    monthPayment.totalBalance += Math.max(0, d.balanceUSD);
+                });
+
+                monthlyPayments.push(monthPayment);
+
+                // Record in schedule for charts
                 const totalBalance = workingDebts.reduce((sum, d) => sum + Math.max(0, d.balanceUSD), 0);
                 if (totalBalance > 1) {
                     schedule.push({
@@ -930,7 +978,9 @@
                 totalInterestUSD: Math.round(totalInterestUSD),
                 totalDebtUSD: debts.reduce((sum, d) => sum + convertToUSD(d.balance, d.currency), 0),
                 schedule: schedule.slice(0, 60),
-                suggestedPayments
+                monthlyPayments: monthlyPayments.slice(0, 60),
+                suggestedPayments,
+                debtNames: debts.map(d => ({ id: d.id, name: d.name, currency: d.currency }))
             };
         }
 
@@ -1008,6 +1058,32 @@
                 `;
             }).join('');
             document.getElementById('payment-suggestions').innerHTML = suggestionsHtml;
+
+            // Build month-by-month payment table
+            const debtHeaders = debts.map((d, idx) => {
+                document.getElementById(`debt${idx + 1}-header`).textContent = d.name;
+                if (idx >= 2) {
+                    document.getElementById(`debt${idx + 1}-header`).style.display = idx < debts.length ? 'table-cell' : 'none';
+                }
+            });
+
+            const tableHtml = strategy.monthlyPayments.map(mp => {
+                let row = `<tr><td><strong>Month ${mp.month}</strong></td>`;
+                
+                debts.forEach(debt => {
+                    const payment = mp.debts[debt.id] || 0;
+                    row += `<td>${formatCurrencyFull(convertFromUSD(payment, debt.currency), debt.currency)}</td>`;
+                });
+                
+                const totalBalanceConverted = debts.length > 0 ? convertFromUSD(mp.totalBalance, debts[0].currency) : mp.totalBalance;
+                row += `<td><strong>${formatCurrencyFull(mp.totalPayment, 'USD')}</strong></td>`;
+                row += `<td><strong>${formatCurrency(mp.totalBalance, 'USD')}</strong></td>`;
+                row += `</tr>`;
+                
+                return row;
+            }).join('');
+
+            document.getElementById('payment-schedule-body').innerHTML = tableHtml;
 
             createDebtChart(strategy);
             document.getElementById('strategy-details').scrollIntoView({ behavior: 'smooth' });
