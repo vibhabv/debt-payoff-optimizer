@@ -474,16 +474,6 @@
         .footer a:hover {
             text-decoration: underline;
         }
-
-        .debt-summary {
-            padding: 10px;
-            margin-bottom: 8px;
-            background: #f0f9ff;
-            border-radius: 4px;
-            border-left: 3px solid #06b6d4;
-            font-size: 0.9em;
-            color: #0f3460;
-        }
     </style>
 </head>
 <body>
@@ -505,7 +495,7 @@
 
                 <div class="form-group">
                     <label>🎯 Target payoff date (optional)</label>
-                    <input type="month" id="payoff-date" placeholder="2027-12">
+                    <input type="date" id="payoff-date">
                 </div>
 
                 <div class="form-group">
@@ -652,6 +642,19 @@
             'CHF': 'Fr'
         };
 
+        const exchangeRates = {
+            'USD': 1.0,
+            'EUR': 1.09,
+            'GBP': 1.27,
+            'INR': 0.012,
+            'JPY': 0.0067,
+            'CAD': 0.74,
+            'AUD': 0.65,
+            'SGD': 0.75,
+            'MXN': 0.058,
+            'CHF': 1.13
+        };
+
         let debts = [
             { id: 1, name: 'Credit Card', balance: 5000, rate: 18, currency: 'USD' },
             { id: 2, name: 'Student Loan', balance: 15000, rate: 4, currency: 'USD' },
@@ -663,6 +666,14 @@
         let strategies = {};
         let totalDebtChart = null;
         let comparisonChart = null;
+
+        function convertToUSD(value, currency) {
+            return value * (exchangeRates[currency] || 1);
+        }
+
+        function convertFromUSD(value, currency) {
+            return value / (exchangeRates[currency] || 1);
+        }
 
         function formatCurrency(value, currency) {
             const symbol = currencySymbols[currency] || '$';
@@ -787,52 +798,57 @@
         }
 
         function calculateStrategy(debts, monthlyBudget, strategy) {
-            let workingDebts = JSON.parse(JSON.stringify(debts));
+            let workingDebts = debts.map(d => ({
+                ...d,
+                balanceUSD: convertToUSD(d.balance, d.currency)
+            }));
+
             let month = 0;
-            let totalInterest = 0;
+            let totalInterestUSD = 0;
             let schedule = [];
 
-            while (workingDebts.some(d => d.balance > 0.01) && month < 360) {
+            while (workingDebts.some(d => d.balanceUSD > 0.01) && month < 360) {
                 month++;
                 let monthlyData = { month, totalBalance: 0, debts: [] };
 
                 workingDebts.forEach(debt => {
                     const monthlyRate = debt.rate / 100 / 12;
-                    debt.accruedInterest = debt.balance * monthlyRate;
-                    totalInterest += debt.accruedInterest;
+                    debt.accruedInterestUSD = debt.balanceUSD * monthlyRate;
+                    totalInterestUSD += debt.accruedInterestUSD;
                 });
 
                 let budgetRemaining = monthlyBudget;
                 workingDebts.forEach(debt => {
-                    if (debt.balance > 0) {
-                        const interestPayment = Math.min(debt.accruedInterest, monthlyBudget);
-                        debt.balance = Math.max(0, debt.balance + debt.accruedInterest - interestPayment);
+                    if (debt.balanceUSD > 0) {
+                        const interestPayment = Math.min(debt.accruedInterestUSD, monthlyBudget);
+                        debt.balanceUSD = Math.max(0, debt.balanceUSD + debt.accruedInterestUSD - interestPayment);
                         budgetRemaining -= interestPayment;
                     }
                 });
 
-                if (budgetRemaining > 0) {
+                if (budgetRemaining > 0.01) {
                     let targetDebt;
+                    
                     if (strategy === 'snowball') {
-                        targetDebt = workingDebts.filter(d => d.balance > 0).sort((a, b) => a.balance - b.balance)[0];
+                        targetDebt = workingDebts.filter(d => d.balanceUSD > 0).sort((a, b) => a.balanceUSD - b.balanceUSD)[0];
                     } else if (strategy === 'avalanche') {
-                        targetDebt = workingDebts.filter(d => d.balance > 0).sort((a, b) => b.rate - a.rate)[0];
+                        targetDebt = workingDebts.filter(d => d.balanceUSD > 0).sort((a, b) => b.rate - a.rate)[0];
                     } else {
-                        targetDebt = workingDebts.filter(d => d.balance > 0).sort((a, b) => {
-                            const impactA = (a.rate * a.balance) / 100;
-                            const impactB = (b.rate * b.balance) / 100;
+                        targetDebt = workingDebts.filter(d => d.balanceUSD > 0).sort((a, b) => {
+                            const impactA = (a.rate * a.balanceUSD) / 100;
+                            const impactB = (b.rate * b.balanceUSD) / 100;
                             return impactB - impactA;
                         })[0];
                     }
                     
                     if (targetDebt) {
-                        targetDebt.balance = Math.max(0, targetDebt.balance - budgetRemaining);
+                        targetDebt.balanceUSD = Math.max(0, targetDebt.balanceUSD - budgetRemaining);
                     }
                 }
 
-                monthlyData.totalBalance = workingDebts.reduce((sum, d) => sum + d.balance, 0);
+                monthlyData.totalBalance = workingDebts.reduce((sum, d) => sum + d.balanceUSD, 0);
                 workingDebts.forEach(debt => {
-                    monthlyData.debts.push({ name: debt.name, balance: Math.max(0, debt.balance) });
+                    monthlyData.debts.push({ name: debt.name, balance: Math.max(0, debt.balanceUSD) });
                 });
 
                 if (monthlyData.totalBalance > 0.01) {
@@ -841,26 +857,26 @@
             }
 
             let suggestedPayments = {};
-            debts.forEach(debt => {
+            workingDebts.forEach(debt => {
+                let payment;
                 if (strategy === 'snowball') {
-                    const sorted = [...debts].sort((a, b) => a.balance - b.balance);
+                    const sorted = workingDebts.sort((a, b) => a.balanceUSD - b.balanceUSD);
                     const index = sorted.findIndex(d => d.id === debt.id);
-                    const basePayment = monthlyBudget / debts.length;
-                    suggestedPayments[debt.id] = index === 0 ? basePayment * 1.5 : basePayment * 0.7;
+                    payment = index === 0 ? monthlyBudget * 0.6 : monthlyBudget / (debts.length - 1) * 0.4;
                 } else if (strategy === 'avalanche') {
-                    const sorted = [...debts].sort((a, b) => b.rate - a.rate);
+                    const sorted = workingDebts.sort((a, b) => b.rate - a.rate);
                     const index = sorted.findIndex(d => d.id === debt.id);
-                    const basePayment = monthlyBudget / debts.length;
-                    suggestedPayments[debt.id] = index === 0 ? basePayment * 1.5 : basePayment * 0.7;
+                    payment = index === 0 ? monthlyBudget * 0.6 : monthlyBudget / (debts.length - 1) * 0.4;
                 } else {
-                    suggestedPayments[debt.id] = monthlyBudget / debts.length;
+                    payment = monthlyBudget / debts.length;
                 }
+                suggestedPayments[debt.id] = convertFromUSD(payment, debt.currency);
             });
 
             return {
                 months: month,
-                totalInterest: Math.round(totalInterest),
-                totalDebt: debts.reduce((sum, d) => sum + d.balance, 0),
+                totalInterestUSD: Math.round(totalInterestUSD),
+                totalDebtUSD: workingDebts.reduce((sum, d) => sum + d.balanceUSD, 0),
                 schedule: schedule.slice(0, 60),
                 suggestedPayments
             };
@@ -874,31 +890,31 @@
                 <tr>
                     <td><strong>Snowball</strong></td>
                     <td>${strategies.snowball.months} months</td>
-                    <td>${formatCurrency(strategies.snowball.totalInterest, 'USD')}</td>
+                    <td>${formatCurrency(strategies.snowball.totalInterestUSD, 'USD')}</td>
                     <td>Quick wins & motivation</td>
                 </tr>
                 <tr>
                     <td><strong>Avalanche</strong></td>
                     <td>${strategies.avalanche.months} months</td>
-                    <td>${formatCurrency(strategies.avalanche.totalInterest, 'USD')}</td>
+                    <td>${formatCurrency(strategies.avalanche.totalInterestUSD, 'USD')}</td>
                     <td>Save the most money</td>
                 </tr>
                 <tr>
                     <td><strong>Hybrid</strong></td>
                     <td>${strategies.hybrid.months} months</td>
-                    <td>${formatCurrency(strategies.hybrid.totalInterest, 'USD')}</td>
+                    <td>${formatCurrency(strategies.hybrid.totalInterestUSD, 'USD')}</td>
                     <td>Balance speed & savings</td>
                 </tr>
             `;
 
             document.getElementById('snowball-months').textContent = strategies.snowball.months + ' mo';
-            document.getElementById('snowball-interest').textContent = formatCurrency(strategies.snowball.totalInterest, 'USD');
+            document.getElementById('snowball-interest').textContent = formatCurrency(strategies.snowball.totalInterestUSD, 'USD');
             
             document.getElementById('avalanche-months').textContent = strategies.avalanche.months + ' mo';
-            document.getElementById('avalanche-interest').textContent = formatCurrency(strategies.avalanche.totalInterest, 'USD');
+            document.getElementById('avalanche-interest').textContent = formatCurrency(strategies.avalanche.totalInterestUSD, 'USD');
             
             document.getElementById('hybrid-months').textContent = strategies.hybrid.months + ' mo';
-            document.getElementById('hybrid-interest').textContent = formatCurrency(strategies.hybrid.totalInterest, 'USD');
+            document.getElementById('hybrid-interest').textContent = formatCurrency(strategies.hybrid.totalInterestUSD, 'USD');
 
             document.getElementById('charts-section').classList.remove('hidden');
             createComparisonChart();
@@ -925,8 +941,8 @@
             document.getElementById('selected-strategy-title').textContent = strategyNames[strategyName];
             document.getElementById('payoff-months').textContent = strategy.months + ' months';
             document.getElementById('payoff-text').textContent = strategy.months <= 12 ? 'Debt-free in' : `Debt-free in (${Math.floor(strategy.months / 12)} years)`;
-            document.getElementById('total-interest').textContent = formatCurrency(strategy.totalInterest, 'USD');
-            document.getElementById('total-debt').textContent = formatCurrency(strategy.totalDebt, 'USD');
+            document.getElementById('total-interest').textContent = formatCurrency(strategy.totalInterestUSD, 'USD');
+            document.getElementById('total-debt').textContent = formatCurrency(strategy.totalDebtUSD, 'USD');
             document.getElementById('budget-display').textContent = formatCurrency(document.getElementById('monthly-budget').value, 'USD');
 
             const suggestionsHtml = debts.map(debt => {
@@ -954,7 +970,7 @@
                 data: {
                     labels: strategy.schedule.map(r => `M${r.month}`),
                     datasets: [{
-                        label: 'Total Debt Remaining',
+                        label: 'Total Debt Remaining (USD)',
                         data: strategy.schedule.map(r => r.totalBalance),
                         borderColor: '#0f3460',
                         backgroundColor: 'rgba(15, 52, 96, 0.1)',
@@ -993,7 +1009,7 @@
                         },
                         {
                             label: 'Total Interest (÷1000)',
-                            data: [strategies.snowball.totalInterest / 1000, strategies.avalanche.totalInterest / 1000, strategies.hybrid.totalInterest / 1000],
+                            data: [strategies.snowball.totalInterestUSD / 1000, strategies.avalanche.totalInterestUSD / 1000, strategies.hybrid.totalInterestUSD / 1000],
                             backgroundColor: '#f59e0b',
                             borderRadius: 6
                         }
