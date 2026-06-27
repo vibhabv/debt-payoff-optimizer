@@ -493,14 +493,20 @@
                     <button class="btn btn-add" onclick="addDebt()">+ Add Debt</button>
                 </div>
 
-                <div class="form-group">
-                    <label>🎯 Target payoff date (optional)</label>
-                    <input type="date" id="payoff-date">
+                <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 15px;">
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label>🎯 Target payoff date (optional)</label>
+                        <input type="date" id="payoff-date">
+                    </div>
+                    <button class="btn" style="flex: 0; background: #f56565; color: white; padding: 8px 12px; font-size: 0.9em;" onclick="clearDate()">Clear</button>
                 </div>
 
-                <div class="form-group">
-                    <label>💵 Total monthly budget (toward all debts)</label>
-                    <input type="number" id="monthly-budget" placeholder="1000" value="1000" min="0">
+                <div style="display: flex; gap: 10px; align-items: flex-end; margin-bottom: 15px;">
+                    <div class="form-group" style="flex: 1; margin-bottom: 0;">
+                        <label>💵 Total monthly budget (toward all debts)</label>
+                        <input type="number" id="monthly-budget" placeholder="1000" value="1000" min="0">
+                    </div>
+                    <button class="btn" style="flex: 0; background: #f56565; color: white; padding: 8px 12px; font-size: 0.9em;" onclick="clearBudget()">Clear</button>
                 </div>
 
                 <div class="button-group">
@@ -767,10 +773,20 @@
 
         function resetForm() {
             debts = [];
+            document.getElementById('payoff-date').value = '';
+            document.getElementById('monthly-budget').value = '1000';
             renderDebts();
             document.querySelectorAll('.results').forEach(el => el.classList.add('hidden'));
             document.getElementById('error-message').innerHTML = '';
             currentStrategy = null;
+        }
+
+        function clearDate() {
+            document.getElementById('payoff-date').value = '';
+        }
+
+        function clearBudget() {
+            document.getElementById('monthly-budget').value = '';
         }
 
         function calculatePayoff() {
@@ -806,47 +822,70 @@
             let month = 0;
             let totalInterestUSD = 0;
             let schedule = [];
+            let priorityPayments = {};
 
             while (workingDebts.some(d => d.balanceUSD > 0.01) && month < 360) {
                 month++;
                 let monthlyData = { month, totalBalance: 0, debts: [] };
+                let budgetRemaining = monthlyBudget;
 
+                // Step 1: Calculate interest for all debts
                 workingDebts.forEach(debt => {
                     const monthlyRate = debt.rate / 100 / 12;
-                    debt.accruedInterestUSD = debt.balanceUSD * monthlyRate;
-                    totalInterestUSD += debt.accruedInterestUSD;
+                    debt.monthlyInterest = debt.balanceUSD * monthlyRate;
+                    totalInterestUSD += debt.monthlyInterest;
                 });
 
-                let budgetRemaining = monthlyBudget;
+                // Step 2: Pay interest on all debts first
                 workingDebts.forEach(debt => {
-                    if (debt.balanceUSD > 0) {
-                        const interestPayment = Math.min(debt.accruedInterestUSD, monthlyBudget);
-                        debt.balanceUSD = Math.max(0, debt.balanceUSD + debt.accruedInterestUSD - interestPayment);
-                        budgetRemaining -= interestPayment;
+                    if (debt.balanceUSD > 0 && budgetRemaining > 0) {
+                        const interestToPay = Math.min(debt.monthlyInterest, budgetRemaining);
+                        debt.balanceUSD += debt.monthlyInterest - interestToPay;
+                        budgetRemaining -= interestToPay;
+                    } else if (debt.balanceUSD > 0) {
+                        debt.balanceUSD += debt.monthlyInterest;
                     }
                 });
 
+                // Step 3: Allocate remaining budget based on strategy
                 if (budgetRemaining > 0.01) {
-                    let targetDebt;
+                    let activeDebts = workingDebts.filter(d => d.balanceUSD > 0.01);
                     
                     if (strategy === 'snowball') {
-                        targetDebt = workingDebts.filter(d => d.balanceUSD > 0).sort((a, b) => a.balanceUSD - b.balanceUSD)[0];
+                        // Pay smallest balance first - ALL extra to smallest
+                        activeDebts.sort((a, b) => a.balanceUSD - b.balanceUSD);
+                        let targetDebt = activeDebts[0];
+                        if (targetDebt) {
+                            const payment = Math.min(targetDebt.balanceUSD, budgetRemaining);
+                            targetDebt.balanceUSD -= payment;
+                            budgetRemaining -= payment;
+                        }
                     } else if (strategy === 'avalanche') {
-                        targetDebt = workingDebts.filter(d => d.balanceUSD > 0).sort((a, b) => b.rate - a.rate)[0];
+                        // Pay highest interest first - ALL extra to highest rate
+                        activeDebts.sort((a, b) => b.rate - a.rate);
+                        let targetDebt = activeDebts[0];
+                        if (targetDebt) {
+                            const payment = Math.min(targetDebt.balanceUSD, budgetRemaining);
+                            targetDebt.balanceUSD -= payment;
+                            budgetRemaining -= payment;
+                        }
                     } else {
-                        targetDebt = workingDebts.filter(d => d.balanceUSD > 0).sort((a, b) => {
+                        // Hybrid: Pay by impact (rate * balance) - highest impact first
+                        activeDebts.sort((a, b) => {
                             const impactA = (a.rate * a.balanceUSD) / 100;
                             const impactB = (b.rate * b.balanceUSD) / 100;
                             return impactB - impactA;
-                        })[0];
-                    }
-                    
-                    if (targetDebt) {
-                        targetDebt.balanceUSD = Math.max(0, targetDebt.balanceUSD - budgetRemaining);
+                        });
+                        let targetDebt = activeDebts[0];
+                        if (targetDebt) {
+                            const payment = Math.min(targetDebt.balanceUSD, budgetRemaining);
+                            targetDebt.balanceUSD -= payment;
+                            budgetRemaining -= payment;
+                        }
                     }
                 }
 
-                monthlyData.totalBalance = workingDebts.reduce((sum, d) => sum + d.balanceUSD, 0);
+                monthlyData.totalBalance = workingDebts.reduce((sum, d) => sum + Math.max(0, d.balanceUSD), 0);
                 workingDebts.forEach(debt => {
                     monthlyData.debts.push({ name: debt.name, balance: Math.max(0, debt.balanceUSD) });
                 });
@@ -856,27 +895,49 @@
                 }
             }
 
+            // Calculate suggested payments for first month
             let suggestedPayments = {};
+            let firstMonthInterest = 0;
             workingDebts.forEach(debt => {
-                let payment;
+                const monthlyRate = debt.rate / 100 / 12;
+                firstMonthInterest += debt.balanceUSD * monthlyRate;
+            });
+
+            let budgetForPrincipal = monthlyBudget - firstMonthInterest;
+            
+            workingDebts.forEach(debt => {
+                const monthlyRate = debt.rate / 100 / 12;
+                const monthlyInterest = debt.balanceUSD * monthlyRate;
+                let principalPayment = 0;
+
                 if (strategy === 'snowball') {
-                    const sorted = workingDebts.sort((a, b) => a.balanceUSD - b.balanceUSD);
-                    const index = sorted.findIndex(d => d.id === debt.id);
-                    payment = index === 0 ? monthlyBudget * 0.6 : monthlyBudget / (debts.length - 1) * 0.4;
+                    const sorted = [...workingDebts].sort((a, b) => a.balanceUSD - b.balanceUSD);
+                    if (sorted[0].id === debt.id && budgetForPrincipal > 0) {
+                        principalPayment = budgetForPrincipal;
+                    }
                 } else if (strategy === 'avalanche') {
-                    const sorted = workingDebts.sort((a, b) => b.rate - a.rate);
-                    const index = sorted.findIndex(d => d.id === debt.id);
-                    payment = index === 0 ? monthlyBudget * 0.6 : monthlyBudget / (debts.length - 1) * 0.4;
+                    const sorted = [...workingDebts].sort((a, b) => b.rate - a.rate);
+                    if (sorted[0].id === debt.id && budgetForPrincipal > 0) {
+                        principalPayment = budgetForPrincipal;
+                    }
                 } else {
-                    payment = monthlyBudget / debts.length;
+                    const sorted = [...workingDebts].sort((a, b) => {
+                        const impactA = (a.rate * a.balanceUSD) / 100;
+                        const impactB = (b.rate * b.balanceUSD) / 100;
+                        return impactB - impactA;
+                    });
+                    if (sorted[0].id === debt.id && budgetForPrincipal > 0) {
+                        principalPayment = budgetForPrincipal;
+                    }
                 }
-                suggestedPayments[debt.id] = convertFromUSD(payment, debt.currency);
+
+                suggestedPayments[debt.id] = convertFromUSD(monthlyInterest + principalPayment, debt.currency);
             });
 
             return {
                 months: month,
                 totalInterestUSD: Math.round(totalInterestUSD),
-                totalDebtUSD: workingDebts.reduce((sum, d) => sum + d.balanceUSD, 0),
+                totalDebtUSD: workingDebts.reduce((sum, d) => sum + convertToUSD(d.balance, d.currency), 0),
                 schedule: schedule.slice(0, 60),
                 suggestedPayments
             };
