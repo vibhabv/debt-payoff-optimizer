@@ -80,13 +80,13 @@ table tr:hover{background:#f8fafc}
 <button class="btn-add" onclick="addDebt()">+ Add Debt</button>
 
 <div class="flex" style="margin-top:15px">
-<div><label style="display:block;font-weight:600;font-size:0.9em;margin-bottom:5px">Target Payoff Date</label><input type="date" id="payoff-date"></div>
-<button class="btn-clear" onclick="clearDate()">Clear</button>
+<div><label style="display:block;font-weight:600;font-size:0.9em;margin-bottom:5px">Target Payoff Date</label><input type="date" id="payoff-date" onchange="autoCalc()"></div>
+<button class="btn-clear" onclick="clearDate();autoCalc()">Clear</button>
 </div>
 
 <div class="flex" style="margin-bottom:15px">
-<div><label style="display:block;font-weight:600;font-size:0.9em;margin-bottom:5px">Monthly Budget ($)</label><input type="number" id="monthly-budget" value="1000" min="0"></div>
-<button class="btn-clear" onclick="clearBudget()">Clear</button>
+<div><label style="display:block;font-weight:600;font-size:0.9em;margin-bottom:5px">Monthly Budget ($)</label><input type="number" id="monthly-budget" value="1000" min="0" onchange="autoCalc()" oninput="autoCalc()"></div>
+<button class="btn-clear" onclick="clearBudget();autoCalc()">Clear</button>
 </div>
 
 <button class="btn-primary" style="width:48%;margin-right:2%" onclick="calculatePayoff()">🚀 Calculate</button>
@@ -97,10 +97,19 @@ table tr:hover{background:#f8fafc}
 <div class="card hidden results" id="comparison-section">
 <h2 style="color:#0f3460;margin:0 0 12px 0">📊 Strategies</h2>
 <div class="warning">💡 Each shows timeline, interest, and payments per debt</div>
+<div style="background:#f0f9ff;border-left:4px solid #06b6d4;padding:10px;margin-bottom:12px;border-radius:4px;font-size:0.85em;color:#0f3460">
+<strong>How to read this:</strong> Timeline = months to pay off all debt. Interest = total interest paid with this strategy. Lower interest = more money saved. Pick the strategy that matches your goal: quick wins (Snowball), save money (Avalanche), or balanced (Hybrid).
+</div>
 <table><thead><tr><th>Strategy</th><th>Timeline</th><th>Interest</th><th>Best For</th></tr></thead>
 <tbody id="comparison-body"></tbody></table>
 
-<h3 style="color:#0f3460;margin:15px 0 10px 0">Choose:</h3>
+<h3 style="color:#0f3460;margin:15px 0 10px 0">Choose Your Strategy:</h3>
+<div style="background:#f0f9ff;border-left:4px solid #06b6d4;padding:12px;margin-bottom:15px;border-radius:4px;font-size:0.9em;color:#0f3460">
+<strong>How each strategy works:</strong><br>
+🎯 <strong>Snowball:</strong> Pays smallest balance first → keeps momentum with quick wins<br>
+💰 <strong>Avalanche:</strong> Pays highest interest first → saves the most money overall<br>
+⚡ <strong>Hybrid:</strong> Combines both → balances quick wins with interest savings
+</div>
 <div class="strategy-buttons">
 <button class="strategy-btn" onclick="selectStrategy('snowball')" id="btn-snowball">
 <h3>🎯 Snowball</h3><p>Smallest first</p>
@@ -123,6 +132,9 @@ table tr:hover{background:#f8fafc}
 
 <div class="card hidden results" id="strategy-details">
 <h2 id="selected-strategy-title" style="color:#0f3460;margin:0 0 12px 0">Strategy Details</h2>
+<div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:10px;margin-bottom:12px;border-radius:4px;font-size:0.85em;color:#92400e">
+<strong>💡 Strategy Impact:</strong> This strategy pays off your debts in the order shown below. The timeline and total interest tell you how quickly you'll be debt-free and how much the order saves (or costs) you.
+</div>
 <div class="result-summary">
 <h3 id="payoff-months">-</h3>
 <p id="payoff-text" style="margin:0">-</p>
@@ -135,11 +147,17 @@ table tr:hover{background:#f8fafc}
 
 <div class="payment-suggestions">
 <h3>💡 Suggested Monthly Payments</h3>
+<div style="background:#f0f9ff;border-left:4px solid #06b6d4;padding:10px;margin-bottom:12px;border-radius:4px;font-size:0.85em;color:#0f3460">
+Pay at least these amounts to stay current and make progress. Numbers include interest + principal to keep accounts from growing.
+</div>
 <div id="payment-suggestions"></div>
 </div>
 
 <div class="breakdown-section">
 <h3>📅 Month-by-Month Breakdown</h3>
+<div style="background:#f0f9ff;border-left:4px solid #06b6d4;padding:10px;margin-bottom:12px;border-radius:4px;font-size:0.85em;color:#0f3460">
+<strong>Understanding the table:</strong> Gray numbers = interest paid that month (money lost to lender). Green numbers = principal paid (money reducing your debt). Goal: increase green, decrease gray over time.
+</div>
 <table><thead><tr id="table-header"></tr></thead>
 <tbody id="payment-schedule-body"></tbody></table>
 </div>
@@ -164,8 +182,10 @@ table tr:hover{background:#f8fafc}
 <script>
 const rates={'USD':1,'EUR':1.09,'GBP':1.27,'INR':0.012,'JPY':0.0067,'CAD':0.74,'AUD':0.65,'SGD':0.75,'MXN':0.058,'CHF':1.13};
 const symbols={'USD':'$','EUR':'€','GBP':'£','INR':'₹','JPY':'¥','CAD':'C$','AUD':'A$','SGD':'S$','MXN':'Mex$','CHF':'Fr'};
-let debts=[{id:1,name:'Car Loan',balance:10000,rate:4,currency:'USD',minPayment:200},{id:2,name:'Home Equity',balance:50000,rate:2,currency:'USD',minPayment:500},{id:3,name:'Credit Card',balance:8000,rate:20,currency:'USD',minPayment:150}];
-let nextId=4,strategies={},currentStrategy=null,charts={};
+let debts=[{id:1,name:'Credit Card',balance:15000,rate:18,currency:'USD',minPayment:200},{id:2,name:'Personal Loan',balance:30000,rate:8,currency:'USD',minPayment:400},{id:3,name:'Emergency Loan',balance:5000,rate:3,currency:'USD',minPayment:100}];
+let nextId=4,strategies={},currentStrategy=null,charts={},calcTimer=null;
+
+function autoCalc(){clearTimeout(calcTimer);calcTimer=setTimeout(()=>{if(debts.length>0)calculatePayoff()},500);}
 
 const toUSD=(v,c)=>v*(rates[c]||1);
 const fromUSD=(v,c)=>v/(rates[c]||1);
@@ -175,9 +195,9 @@ const fmtFull=(v,c)=>(symbols[c]||'$')+Math.round(v).toLocaleString();
 function renderDebts(){
 const c=document.getElementById('debts-list');
 if(!debts.length){c.innerHTML='<p style="color:#999;text-align:center;padding:15px">No debts</p>';return}
-c.innerHTML=debts.map((d,i)=>`<div class="debt-item"><div style="display:flex;justify-content:space-between;align-items:center"><h4>#${i+1}: ${d.name}</h4><button class="btn-remove" onclick="removeDebt(${d.id})">Remove</button></div><input type="text" value="${d.name}" placeholder="Debt name" onchange="updateDebt(${d.id},'name',this.value)"><div class="form-row three"><div><label>Balance</label><input type="number" value="${d.balance}" onchange="updateDebt(${d.id},'balance',+this.value)" min="0"></div><div><label>Rate %</label><input type="number" value="${d.rate}" onchange="updateDebt(${d.id},'rate',+this.value)" min="0" step="0.1"></div><div><label>Currency</label><select onchange="updateDebt(${d.id},'currency',this.value)"><option value="USD" ${d.currency==='USD'?'selected':''}>USD</option><option value="EUR" ${d.currency==='EUR'?'selected':''}>EUR</option><option value="GBP" ${d.currency==='GBP'?'selected':''}>GBP</option><option value="INR" ${d.currency==='INR'?'selected':''}>INR</option><option value="CAD" ${d.currency==='CAD'?'selected':''}>CAD</option><option value="AUD" ${d.currency==='AUD'?'selected':''}>AUD</option></select></div></div><div class="form-row"><div><label>Min Payment</label><input type="number" value="${d.minPayment||''}" onchange="updateDebt(${d.id},'minPayment',+this.value)" min="0"></div></div></div>`).join('')}
+c.innerHTML=debts.map((d,i)=>`<div class="debt-item"><div style="display:flex;justify-content:space-between;align-items:center"><h4>#${i+1}: ${d.name}</h4><button class="btn-remove" onclick="removeDebt(${d.id});autoCalc()">Remove</button></div><input type="text" value="${d.name}" placeholder="Debt name" onchange="updateDebt(${d.id},'name',this.value);autoCalc()" oninput="updateDebt(${d.id},'name',this.value)"><div class="form-row three"><div><label>Balance</label><input type="number" value="${d.balance}" onchange="updateDebt(${d.id},'balance',+this.value);autoCalc()" oninput="updateDebt(${d.id},'balance',+this.value);autoCalc()" min="0"></div><div><label>Rate %</label><input type="number" value="${d.rate}" onchange="updateDebt(${d.id},'rate',+this.value);autoCalc()" oninput="updateDebt(${d.id},'rate',+this.value);autoCalc()" min="0" step="0.1"></div><div><label>Currency</label><select onchange="updateDebt(${d.id},'currency',this.value);autoCalc()"><option value="USD" ${d.currency==='USD'?'selected':''}>USD</option><option value="EUR" ${d.currency==='EUR'?'selected':''}>EUR</option><option value="GBP" ${d.currency==='GBP'?'selected':''}>GBP</option><option value="INR" ${d.currency==='INR'?'selected':''}>INR</option><option value="CAD" ${d.currency==='CAD'?'selected':''}>CAD</option><option value="AUD" ${d.currency==='AUD'?'selected':''}>AUD</option></select></div></div><div class="form-row"><div><label>Min Payment</label><input type="number" value="${d.minPayment||''}" onchange="updateDebt(${d.id},'minPayment',+this.value);autoCalc()" oninput="updateDebt(${d.id},'minPayment',+this.value);autoCalc()" min="0"></div></div></div>`).join('')}
 
-function addDebt(){debts.push({id:nextId++,name:`Debt ${debts.length+1}`,balance:5000,rate:10,currency:'USD',minPayment:100});renderDebts()}
+function addDebt(){debts.push({id:nextId++,name:`Debt ${debts.length+1}`,balance:5000,rate:10,currency:'USD',minPayment:100});renderDebts();autoCalc()}
 function removeDebt(id){debts=debts.filter(d=>d.id!==id);renderDebts()}
 function updateDebt(id,f,v){const d=debts.find(x=>x.id===id);if(d)d[f]=v}
 function clearDate(){document.getElementById('payoff-date').value=''}
